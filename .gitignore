@@ -171,3 +171,4 @@ venv
 # Mac crap
 .DS_Store
 *.sqlite
+.env
