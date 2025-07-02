@@ -13,22 +13,41 @@ import random
 import binascii
 import tempfile
 import shutil
+import typing
+from typing import Optional, Dict, Any, List, Tuple, Union
 
 import requests
 from tenacity import retry, wait_exponential, retry_if_exception_type
+from requests.exceptions import RequestException
 
 from .errors import ValidationError, RequestError
 from .crypto import (a32_to_base64, encrypt_key, base64_url_encode,
-                     encrypt_attr, base64_to_a32, base64_url_decode,
-                     decrypt_attr, a32_to_str, get_chunks, str_to_a32,
-                     decrypt_key, mpi_to_int, stringhash, prepare_key, make_id,
-                     makebyte, modular_inverse)
+                      encrypt_attr, base64_to_a32, base64_url_decode,
+                      decrypt_attr, a32_to_str, get_chunks, str_to_a32,
+                      decrypt_key, mpi_to_int, stringhash, prepare_key, make_id,
+                      makebyte, modular_inverse)
 
 logger = logging.getLogger(__name__)
 
+class MegaException(Exception):
+    """Base exception for all MEGA-related errors."""
+    pass
+
+class AuthenticationError(MegaException):
+    """Raised when authentication fails."""
+    pass
+
+class NetworkError(MegaException):
+    """Raised when network request fails."""
+    pass
+
+class CryptoError(MegaException):
+    """Raised when cryptographic operations fail."""
+    pass
+
 
 class Mega:
-    def __init__(self, options=None):
+    def __init__(self, options: Optional[Dict[str, Any]] = None) -> None:
         self.schema = 'https'
         self.domain = 'mega.co.nz'
         self.timeout = 160  # max secs to wait for resp from api requests
@@ -41,14 +60,35 @@ class Mega:
             options = {}
         self.options = options
 
-    def login(self, email=None, password=None):
-        if email:
-            self._login_user(email, password)
-        else:
-            self.login_anonymous()
-        self._trash_folder_node_id = self.get_node_by_type(4)[0]
-        logger.info('Login complete')
-        return self
+    def login(self, email: Optional[str] = None, password: Optional[str] = None) -> 'Mega':
+        """
+        Login to MEGA account.
+        
+        Args:
+            email: User email address
+            password: User password
+            
+        Returns:
+            self: The Mega instance
+            
+        Raises:
+            AuthenticationError: If login fails
+            NetworkError: If network request fails
+        """
+        try:
+            if email:
+                self._login_user(email, password)
+            else:
+                self.login_anonymous()
+            self._trash_folder_node_id = self.get_node_by_type(4)[0]
+            logger.info('Login complete')
+            return self
+        except RequestError as e:
+            logger.error(f'Login failed: {e}')
+            raise AuthenticationError(f'Login failed: {e}') from e
+        except RequestException as e:
+            logger.error(f'Network error during login: {e}')
+            raise NetworkError(f'Network error: {e}') from e
 
     def _login_user(self, email, password):
         logger.info('Logging in user...')
@@ -149,44 +189,70 @@ class Mega:
             sid = binascii.unhexlify('0' + sid if len(sid) % 2 else sid)
             self.sid = base64_url_encode(sid[:43])
 
-    @retry(retry=retry_if_exception_type(RuntimeError),
-           wait=wait_exponential(multiplier=2, min=2, max=60))
-    def _api_request(self, data):
-        params = {'id': self.sequence_num}
-        self.sequence_num += 1
-
-        if self.sid:
-            params.update({'sid': self.sid})
-
-        # ensure input data is a list
-        if not isinstance(data, list):
-            data = [data]
-
-        url = f'{self.schema}://g.api.{self.domain}/cs'
-        response = requests.post(
-            url,
-            params=params,
-            data=json.dumps(data),
-            timeout=self.timeout,
-        )
-        json_resp = json.loads(response.text)
+    @retry(
+        retry=retry_if_exception_type((RuntimeError, RequestException)),
+        wait=wait_exponential(multiplier=2, min=2, max=60),
+        reraise=True
+    )
+    def _api_request(self, data: Union[Dict[str, Any], List[Dict[str, Any]]]) -> Any:
+        """
+        Make an API request to MEGA server.
+        
+        Args:
+            data: Request data as dict or list of dicts
+            
+        Returns:
+            API response data
+            
+        Raises:
+            NetworkError: If network request fails
+            RequestError: If API request fails
+        """
         try:
+            params = {'id': self.sequence_num}
+            self.sequence_num += 1
+
+            if self.sid:
+                params.update({'sid': self.sid})
+
+            # ensure input data is a list
+            if not isinstance(data, list):
+                data = [data]
+
+            url = f'{self.schema}://g.api.{self.domain}/cs'
+            response = requests.post(
+                url,
+                params=params,
+                data=json.dumps(data),
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            json_resp = json.loads(response.text)
+            
             if isinstance(json_resp, list):
-                int_resp = json_resp[0] if isinstance(json_resp[0],
-                                                      int) else None
+                int_resp = json_resp[0] if isinstance(json_resp[0], int) else None
             elif isinstance(json_resp, int):
                 int_resp = json_resp
-        except IndexError:
-            int_resp = None
-        if int_resp is not None:
-            if int_resp == 0:
-                return int_resp
-            if int_resp == -3:
-                msg = 'Request failed, retrying'
-                logger.info(msg)
-                raise RuntimeError(msg)
-            raise RequestError(int_resp)
-        return json_resp[0]
+            else:
+                int_resp = None
+                
+            if int_resp is not None:
+                if int_resp == 0:
+                    return int_resp
+                if int_resp == -3:
+                    msg = 'Request failed, retrying'
+                    logger.info(msg)
+                    raise RuntimeError(msg)
+                raise RequestError(int_resp)
+            
+            return json_resp[0]
+            
+        except RequestException as e:
+            logger.error(f'Network error: {e}')
+            raise NetworkError(f'Network error: {e}') from e
+        except json.JSONDecodeError as e:
+            logger.error(f'Failed to decode JSON response: {e}')
+            raise RequestError(f'Invalid response format: {e}') from e
 
     def _parse_url(self, url):
         """Parse file id and key from url."""
