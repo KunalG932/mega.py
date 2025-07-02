@@ -696,20 +696,45 @@ class Mega:
         nodes = self.get_files()
         return self.get_folder_link(nodes[node_id])
 
-    def download_url(self, url, dest_path=None, dest_filename=None):
+    def download_url(self, url: str, dest_path: Optional[str] = None, dest_filename: Optional[str] = None) -> str:
         """
-        Download a file by it's public url
+        Download a file by its public URL.
+
+        Args:
+            url: Public MEGA file URL
+            dest_path: Destination directory path
+            dest_filename: Destination filename
+
+        Returns:
+            Path to the downloaded file
+
+        Raises:
+            ValueError: If URL is invalid
+            NetworkError: If download fails
         """
-        path = self._parse_url(url).split('!')
-        file_id = path[0]
-        file_key = path[1]
-        return self._download_file(
-            file_handle=file_id,
-            file_key=file_key,
-            dest_path=dest_path,
-            dest_filename=dest_filename,
-            is_public=True,
-        )
+        try:
+            path = self._parse_url(url).split('!')
+            if len(path) != 2:
+                raise ValueError("Invalid MEGA URL format")
+            
+            file_id, file_key = path
+            if not file_id or not file_key:
+                raise ValueError("Missing file ID or key in URL")
+            
+            return self._download_file(
+                file_handle=file_id,
+                file_key=file_key,
+                dest_path=dest_path,
+                dest_filename=dest_filename,
+                is_public=True,
+            )
+            
+        except ValueError as e:
+            logger.error(f"Invalid URL format: {e}")
+            raise
+        except RequestException as e:
+            logger.error(f"Network error during download: {e}")
+            raise NetworkError(f"Download failed: {e}") from e
 
     def _download_file(self,
                        file_handle,
