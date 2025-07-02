@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*
 
-from __future__ import absolute_import
-
 import os
 from codecs import open
 
@@ -34,10 +32,13 @@ setup(name='mega.py',
       author_email='hello@odwyer.software',
       license='Creative Commons Attribution-Noncommercial-Share Alike license',
       install_requires=install_requires,
+      python_requires='>=3.11',
       classifiers=[
           'Intended Audience :: Developers',
           'Operating System :: OS Independent',
           'Programming Language :: Python',
           'Programming Language :: Python :: 3',
+          'Programming Language :: Python :: 3.11',
+          'Programming Language :: Python :: 3.12',
           'Topic :: Internet :: WWW/HTTP',
       ])

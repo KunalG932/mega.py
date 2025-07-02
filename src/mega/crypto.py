@@ -5,6 +5,7 @@ import struct
 import binascii
 import random
 import sys
+import codecs
 
 # Python3 compatibility
 if sys.version_info < (3, ):
@@ -15,8 +16,6 @@ if sys.version_info < (3, ):
     def makestring(x):
         return x
 else:
-    import codecs
-
     def makebyte(x):
         return codecs.latin_1_encode(x)[0]
 
